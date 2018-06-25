@@ -1,6 +1,10 @@
-﻿using IdentityServer4.Contrib.RedisStore.Stores;
+﻿using IdentityServer4.Contrib.RedisStore;
+using IdentityServer4.Contrib.RedisStore.Cache;
+using IdentityServer4.Contrib.RedisStore.Stores;
+using IdentityServer4.Services;
 using IdentityServer4.Stores;
-using StackExchange.Redis;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using System;
 
 namespace Microsoft.Extensions.DependencyInjection
 {
@@ -10,28 +14,51 @@ namespace Microsoft.Extensions.DependencyInjection
         /// Add Redis Operational Store.
         /// </summary>
         /// <param name="builder"></param>
-        /// <param name="redisConnectionString">Redis Store Connection String</param>
-        /// <param name="db">the number of Db in Redis Instance</param>
+        /// <param name="optionsBuilder">Redis Operational Store Options builder</param>
         /// <returns></returns>
-        public static IIdentityServerBuilder AddOperationalStore(this IIdentityServerBuilder builder, string redisConnectionString, int db = -1)
+        public static IIdentityServerBuilder AddOperationalStore(this IIdentityServerBuilder builder, Action<RedisOperationalStoreOptions> optionsBuilder)
         {
-            builder.Services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(redisConnectionString));
-            builder.Services.AddScoped<IDatabase>(_ => _.GetRequiredService<IConnectionMultiplexer>().GetDatabase(db));
+            var options = new RedisOperationalStoreOptions();
+            optionsBuilder?.Invoke(options);
+            builder.Services.AddSingleton(options);
+
+            builder.Services.AddScoped<RedisMultiplexer<RedisOperationalStoreOptions>>();
             builder.Services.AddTransient<IPersistedGrantStore, PersistedGrantStore>();
             return builder;
         }
 
         /// <summary>
-        /// Add Redis Operational Store.
+        /// Add Redis caching that implements ICache<typeparamref name="T"/>
         /// </summary>
         /// <param name="builder"></param>
-        /// <param name="options">ConfigurationOptions object.</param>
+        /// <param name="optionsBuilder">Redis Cache Options builder</param>
         /// <returns></returns>
-        public static IIdentityServerBuilder AddOperationalStore(this IIdentityServerBuilder builder, ConfigurationOptions options)
+        public static IIdentityServerBuilder AddRedisCaching(this IIdentityServerBuilder builder, Action<RedisCacheOptions> optionsBuilder)
         {
-            builder.Services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(options));
-            builder.Services.AddScoped<IDatabase>(_ => _.GetRequiredService<IConnectionMultiplexer>().GetDatabase());
-            builder.Services.AddTransient<IPersistedGrantStore, PersistedGrantStore>();
+            var options = new RedisCacheOptions();
+            optionsBuilder?.Invoke(options);
+            builder.Services.AddSingleton(options);
+
+            builder.Services.AddScoped<RedisMultiplexer<RedisCacheOptions>>();
+            builder.Services.AddTransient(typeof(ICache<>), typeof(RedisCache<>));
+            return builder;
+        }
+
+        ///<summary>
+        /// Add Redis caching for IProfileService Implementation
+        /// </summary>
+        /// <param name="builder"></param>
+        /// <param name="optionsBuilder">Profile Service Redis Cache Options builder</param>
+        /// <returns></returns>
+        public static IIdentityServerBuilder AddProfileServiceCache<TProfileService>(this IIdentityServerBuilder builder, Action<ProfileServiceCachingOptions<TProfileService>> optionsBuilder = null)
+        where TProfileService : class, IProfileService
+        {
+            var options = new ProfileServiceCachingOptions<TProfileService>();
+            optionsBuilder?.Invoke(options);
+            builder.Services.AddSingleton(options);
+
+            builder.Services.TryAddTransient(typeof(TProfileService));
+            builder.Services.AddTransient<IProfileService, CachingProfileService<TProfileService>>();
             return builder;
         }
     }
